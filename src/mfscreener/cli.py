@@ -5,7 +5,12 @@ from typing import Callable
 
 import typer
 
-from mfscreener.amfi.history import backfill_recent_months
+from mfscreener.amfi.history import (
+    AMFI_OPEN_ENDED_START,
+    backfill_recent_months,
+    backfill_since_2006,
+    backfill_thin_schemes_via_fallback,
+)
 from mfscreener.amfi.navall import sync_nav_daily
 from mfscreener.amfi.ter import sync_aum_from_latest_nav, sync_ter_month
 from mfscreener.db import finish_ingestion, run_migrations, start_ingestion
@@ -40,12 +45,35 @@ def sync_nav_daily_cmd() -> None:
 
 
 @app.command("backfill-nav")
-def backfill_nav_cmd(months: int = typer.Option(3, help="Months of history to pull")) -> None:
+def backfill_nav_cmd(
+    full: bool = typer.Option(
+        True,
+        "--full/--partial",
+        help="Full AMFI history from Apr 2006 (default) or partial window",
+    ),
+    months: int = typer.Option(3, help="When --partial, months of history to pull"),
+    chunk_days: int = typer.Option(31, help="Days per AMFI bulk request"),
+    resume: bool = typer.Option(True, help="Skip chunks already in .data/backfill_progress.json"),
+) -> None:
     def _fn() -> dict:
+        if full:
+            return backfill_since_2006(chunk_days=chunk_days, resume=resume)
         chunks = backfill_recent_months(months=months)
         return {"chunks": len(chunks), "last": chunks[-1] if chunks else {}}
 
     _run_job("backfill_nav", _fn)
+
+
+@app.command("backfill-nav-fallback")
+def backfill_nav_fallback_cmd(
+    min_points: int = typer.Option(252, help="Schemes with fewer NAV days use mfapi/finapi"),
+    limit: int | None = typer.Option(None, help="Cap schemes (for testing)"),
+) -> None:
+    """Fill gaps when AMFI throttles: mfapi.in first, then finapi.upvaly.com."""
+    _run_job(
+        "backfill_nav_fallback",
+        lambda: backfill_thin_schemes_via_fallback(min_nav_points=min_points, limit=limit),
+    )
 
 
 @app.command("compute-returns")
@@ -79,19 +107,25 @@ def sync_holdings_cmd(limit: int = 50) -> None:
 
 
 @app.command("first-cut")
-def first_cut_cmd(months: int = typer.Option(1, help="Months of NAV history to backfill")) -> None:
-    """Load AMFI base data into local Postgres and compute first-cut screener metrics."""
-
-    def backfill_fn() -> dict:
-        chunks = backfill_recent_months(months=months)
-        return {"chunks": len(chunks), "last": chunks[-1] if chunks else {}}
-
+def first_cut_cmd(
+    skip_full_history: bool = typer.Option(
+        False,
+        "--skip-full-history",
+        help="Skip 2006→today bulk (not recommended)",
+    ),
+) -> None:
+    """AMFI NAV + full history backfill + mfapi/finapi gap-fill + metrics."""
     _run_job("sync_nav_daily", sync_nav_daily)
-    _run_job("backfill_nav", backfill_fn)
+    if not skip_full_history:
+        _run_job("backfill_nav", lambda: backfill_since_2006(resume=True))
+        _run_job(
+            "backfill_nav_fallback",
+            lambda: backfill_thin_schemes_via_fallback(min_nav_points=252),
+        )
     _run_job("compute_returns", compute_returns_and_screener)
     _run_job("sync_benchmarks", lambda: sync_benchmarks(days=5))
     _run_job("compute_risk", compute_risk_and_ranks)
-    typer.echo("First cut complete: base data in DB, screener_wide populated.")
+    typer.echo(f"Pipeline complete (history from {AMFI_OPEN_ENDED_START}).")
 
 
 @app.command("run-nightly")

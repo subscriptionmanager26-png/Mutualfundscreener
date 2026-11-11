@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         "https://www.amfiindia.com/api/populate-te-rdata-revised"
         "?MF_ID=All&Month={month}&strCat=-1&strType=-1&excel=true"
     )
+    mfapi_base_url: str = "https://api.mfapi.in"
+    finapi_base_url: str = "https://finapi.upvaly.com"
+    finapi_api_key: str | None = None
 
 
 @lru_cache

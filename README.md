@@ -21,19 +21,17 @@ mf-job first-cut
 
 That runs:
 
-1. **AMFI `NAVAll.txt`** → `scheme_master`, `nav_daily`, raw archive  
-2. **~1 month history backfill** (optional depth via `mf-job backfill-nav`)  
-3. **Trailing returns** → `screener_wide`  
-4. **Risk metrics** (vol, drawdown, beta/Sharpe where benchmark data exists) + category ranks  
+1. **AMFI `NAVAll.txt`** → `scheme_master`, `nav_daily`  
+2. **Bulk NAV history Apr 2006 → today** (AMFI; retries + chunk split if throttled)  
+3. **`mf-job backfill-nav-fallback`** — schemes still short on history via **mfapi.in**, then **finapi**  
+4. **Returns + risk** → `screener_wide`  
 
-Or step by step:
+Long history only (resumable):
 
 ```bash
-mf-job sync-nav-daily
-mf-job backfill-nav --months 1
-mf-job compute-returns
-mf-job sync-benchmarks
-mf-job compute-risk
+mf-job backfill-nav --full          # default; progress in .data/backfill_progress.json
+mf-job backfill-nav-fallback      # after AMFI pass or when throttled
+mf-job compute-returns && mf-job compute-risk
 ```
 
 Serve the API on this host:
