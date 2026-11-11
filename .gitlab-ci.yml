@@ -15,7 +15,7 @@ test:
   script:
     - pytest -q
 
-# Scheduled pipeline: nightly AMFI sync (requires CI variables DATABASE_URL, S3_*, etc.)
+# Optional scheduled pipeline on a runner with local Postgres + DATABASE_URL
 nightly-ingest:
   stage: ingest
   rules:

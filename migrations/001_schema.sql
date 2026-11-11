@@ -1,4 +1,4 @@
--- TimescaleDB (production docker-compose). Skip cleanly on plain Postgres dev installs.
+-- TimescaleDB is optional on this host; plain Postgres is the default.
 DO $$
 BEGIN
     CREATE EXTENSION IF NOT EXISTS timescaledb;

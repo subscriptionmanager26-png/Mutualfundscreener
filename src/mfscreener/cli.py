@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from datetime import date
 from typing import Callable
 
@@ -77,6 +76,22 @@ def compute_risk_cmd() -> None:
 @app.command("sync-holdings")
 def sync_holdings_cmd(limit: int = 50) -> None:
     _run_job("sync_holdings", lambda: sync_holdings_for_active_families(limit=limit))
+
+
+@app.command("first-cut")
+def first_cut_cmd(months: int = typer.Option(1, help="Months of NAV history to backfill")) -> None:
+    """Load AMFI base data into local Postgres and compute first-cut screener metrics."""
+
+    def backfill_fn() -> dict:
+        chunks = backfill_recent_months(months=months)
+        return {"chunks": len(chunks), "last": chunks[-1] if chunks else {}}
+
+    _run_job("sync_nav_daily", sync_nav_daily)
+    _run_job("backfill_nav", backfill_fn)
+    _run_job("compute_returns", compute_returns_and_screener)
+    _run_job("sync_benchmarks", lambda: sync_benchmarks(days=5))
+    _run_job("compute_risk", compute_risk_and_ranks)
+    typer.echo("First cut complete: base data in DB, screener_wide populated.")
 
 
 @app.command("run-nightly")
