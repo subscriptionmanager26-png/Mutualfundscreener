@@ -102,6 +102,14 @@ def _persist_nav_rows(rows: list[tuple[int, date, float, str]]) -> int:
     inserted = 0
     codes = sorted({r[0] for r in rows})
     with connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO scheme_master (scheme_code, amc, scheme_name)
+            VALUES (%s, '', %s)
+            ON CONFLICT (scheme_code) DO NOTHING
+            """,
+            [(code, f"Scheme {code}") for code in codes],
+        )
         with conn.cursor() as cur:
             cur.executemany(
                 """
@@ -111,16 +119,7 @@ def _persist_nav_rows(rows: list[tuple[int, date, float, str]]) -> int:
                 """,
                 rows,
             )
-            inserted = cur.rowcount
-        for code in codes:
-            conn.execute(
-                """
-                INSERT INTO scheme_master (scheme_code, amc, scheme_name)
-                VALUES (%s, '', %s)
-                ON CONFLICT (scheme_code) DO NOTHING
-                """,
-                (code, f"Scheme {code}"),
-            )
+            inserted = max(cur.rowcount, 0)
         conn.execute(
             """
             UPDATE scheme_master sm SET
