@@ -1,0 +1,25 @@
+stages:
+  - test
+  - ingest
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+default:
+  image: python:3.12-slim
+  before_script:
+    - pip install -e ".[dev]"
+
+test:
+  stage: test
+  script:
+    - pytest -q
+
+# Scheduled pipeline: nightly AMFI sync (requires CI variables DATABASE_URL, S3_*, etc.)
+nightly-ingest:
+  stage: ingest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - mf-job migrate
+    - mf-job run-nightly
