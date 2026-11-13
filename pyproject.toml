@@ -1,0 +1,33 @@
+[project]
+name = "mf-screener"
+version = "0.1.0"
+description = "India AMFI mutual fund screener — ingest, compute, API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "psycopg[binary,pool]>=3.2.0",
+    "httpx>=0.27.0",
+    "openpyxl>=3.1.0",
+    "python-dateutil>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "typer>=0.12.0",
+    "numpy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.8.0"]
+
+[project.scripts]
+mf-job = "mfscreener.cli:app"
+
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
