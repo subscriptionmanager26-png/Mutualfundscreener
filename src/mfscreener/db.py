@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
@@ -32,11 +33,37 @@ def connection() -> Iterator[psycopg.Connection[Any]]:
 
 
 def run_migrations() -> None:
-    migration = Path(__file__).resolve().parents[2] / "migrations" / "001_schema.sql"
-    sql = migration.read_text(encoding="utf-8")
+    migrations_dir = Path(__file__).resolve().parents[2] / "migrations"
     with connection() as conn:
-        conn.execute(sql)
+        for migration in sorted(migrations_dir.glob("*.sql")):
+            conn.execute(migration.read_text(encoding="utf-8"))
         conn.commit()
+
+
+def get_state(key: str) -> str | None:
+    with connection() as conn:
+        row = conn.execute("SELECT value FROM pipeline_state WHERE key = %s", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_state(key: str, value: str) -> None:
+    with connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO pipeline_state (key, value) VALUES (%s, %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            (key, value),
+        )
+        conn.commit()
+
+
+def nav_row_count() -> int:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT reltuples::bigint AS n FROM pg_class WHERE relname = 'nav_daily'"
+        ).fetchone()
+    return max(int(row["n"]) if row else 0, 0)
 
 
 def start_ingestion(job_name: str) -> int:

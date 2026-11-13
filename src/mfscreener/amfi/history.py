@@ -11,8 +11,7 @@ from urllib.parse import urlencode
 import httpx
 
 from mfscreener.amfi.fallback_nav import ExternalNavError, fetch_nav_with_fallback
-from mfscreener.config import get_settings
-from mfscreener.db import connection
+from mfscreener.db import connection, get_state, set_state
 from mfscreener.storage import archive_raw
 
 logger = logging.getLogger(__name__)
@@ -73,7 +72,10 @@ def download_history_chunk(
     raise RuntimeError(f"AMFI chunk {frmdt}..{todt} failed after {max_attempts} tries: {last_err}")
 
 
-def parse_history_text(text: str) -> list[tuple[int, date, float]]:
+def parse_history_text(
+    text: str,
+    names: dict[int, str] | None = None,
+) -> list[tuple[int, date, float]]:
     out: list[tuple[int, date, float]] = []
     for line in text.splitlines():
         line = line.strip()
@@ -92,8 +94,25 @@ def parse_history_text(text: str) -> list[tuple[int, date, float]]:
             continue
         if nav <= 0:
             continue
+        if names is not None and parts[1]:
+            names[code] = parts[1]
         out.append((code, nav_date, nav))
     return out
+
+
+def _fill_placeholder_names(names: dict[int, str]) -> None:
+    if not names:
+        return
+    with connection() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                UPDATE scheme_master SET scheme_name = %s
+                WHERE scheme_code = %s AND scheme_name = 'Scheme ' || scheme_code::text
+                """,
+                [(name, code) for code, name in names.items()],
+            )
+        conn.commit()
 
 
 def _persist_nav_rows(rows: list[tuple[int, date, float, str]]) -> int:
@@ -145,9 +164,11 @@ def _persist_nav_rows(rows: list[tuple[int, date, float, str]]) -> int:
 
 def backfill_chunk(frmdt: date, todt: date) -> dict[str, int | str]:
     text = download_history_chunk(frmdt, todt)
-    parsed = parse_history_text(text)
+    names: dict[int, str] = {}
+    parsed = parse_history_text(text, names)
     rows = [(c, d, n, "amfi-history") for c, d, n in parsed]
     inserted = _persist_nav_rows(rows)
+    _fill_placeholder_names(names)
     return {
         "source": "amfi",
         "parsed_rows": len(parsed),
@@ -224,11 +245,54 @@ def backfill_since_2006(*, chunk_days: int = 31, resume: bool = True) -> dict[st
     end = date.today()
     chunks = backfill_range(AMFI_OPEN_ENDED_START, end, chunk_days=chunk_days, resume=resume)
     inserted = sum(int(c.get("inserted", 0)) for c in chunks)
+    if not any(c.get("source") == "amfi-failed" for c in chunks):
+        set_state(HISTORY_WATERMARK_KEY, end.isoformat())
     return {
         "start": AMFI_OPEN_ENDED_START.isoformat(),
         "end": end.isoformat(),
         "chunks_ok": len(chunks),
         "rows_inserted": inserted,
+    }
+
+
+HISTORY_WATERMARK_KEY = "history_complete_through"
+# Re-fetch a few days behind the watermark so late AMFI corrections are not missed.
+CATCH_UP_OVERLAP_DAYS = 5
+
+
+def history_watermark() -> date | None:
+    raw = get_state(HISTORY_WATERMARK_KEY)
+    if raw:
+        return date.fromisoformat(raw)
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT MAX(nav_date) AS d FROM nav_daily WHERE source = 'amfi-history'"
+        ).fetchone()
+    return row["d"] if row and row["d"] else None
+
+
+def catch_up_history() -> dict[str, object]:
+    """Backfill only the gap between the stored watermark and today."""
+    watermark = history_watermark()
+    if watermark is None:
+        raise RuntimeError("No NAV history in the database; run `mf-job backfill-nav --full` first.")
+    end = date.today()
+    start = watermark - timedelta(days=CATCH_UP_OVERLAP_DAYS)
+    chunks = backfill_range(start, end, chunk_days=31, resume=False)
+    failed = [c for c in chunks if c.get("source") == "amfi-failed"]
+    if failed:
+        first_failed = min(date.fromisoformat(str(c["from"])) for c in failed)
+        new_mark = max(watermark, first_failed - timedelta(days=1))
+    else:
+        new_mark = end
+    set_state(HISTORY_WATERMARK_KEY, new_mark.isoformat())
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "chunks": len(chunks),
+        "failed_chunks": len(failed),
+        "rows_inserted": sum(int(c.get("inserted", 0)) for c in chunks),
+        "watermark": new_mark.isoformat(),
     }
 
 

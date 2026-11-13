@@ -183,6 +183,26 @@ def upsert_navall_rows(rows: list[NavAllRow], file_as_of: date | None) -> dict[s
     return stats
 
 
+def refresh_active_flags() -> dict[str, int]:
+    """A scheme is active when its last NAV is within N days of the newest NAV anywhere."""
+    settings = get_settings()
+    with connection() as conn:
+        conn.execute(
+            """
+            UPDATE scheme_master SET is_active = (
+                last_nav_date IS NOT NULL
+                AND last_nav_date >= (SELECT MAX(last_nav_date) FROM scheme_master) - %s
+            )
+            """,
+            (settings.active_nav_stale_days,),
+        )
+        row = conn.execute(
+            "SELECT COUNT(*) FILTER (WHERE is_active) AS a, COUNT(*) AS t FROM scheme_master"
+        ).fetchone()
+        conn.commit()
+    return {"active": int(row["a"]), "total": int(row["t"])}
+
+
 def sync_nav_daily() -> dict[str, object]:
     text, archive_key = download_navall()
     rows, latest = parse_navall(text)
