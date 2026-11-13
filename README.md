@@ -6,7 +6,7 @@ AMFI-first India mutual fund screener. NAV history (April 2006 onward), scheme m
 
 The Cloud Agent environment for this repo boots from a snapshot that already contains the loaded database (~25M NAV rows), so agents and automations never rebuild history.
 
-- On boot, `scripts/cloud-agent-start.sh` starts Postgres and prints the `nav_daily` row count (log: `/tmp/cursor/start-user/start-user.log`).
+- The snapshot restores Postgres stopped. The environment start command boots it, and every `mf-job` command also starts the local cluster itself if it is down, so automations work either way.
 - Begin every automation with:
 
   ```bash

@@ -14,12 +14,24 @@ from mfscreener.amfi.history import (
 )
 from mfscreener.amfi.navall import refresh_active_flags, sync_nav_daily
 from mfscreener.amfi.ter import sync_aum_from_latest_nav, sync_ter_month
-from mfscreener.db import finish_ingestion, nav_row_count, run_migrations, start_ingestion
+from mfscreener.db import (
+    ensure_local_postgres,
+    finish_ingestion,
+    nav_row_count,
+    run_migrations,
+    start_ingestion,
+)
 from mfscreener.jobs.benchmarks_risk import compute_risk_and_ranks, sync_benchmarks
 from mfscreener.jobs.compute_returns import compute_returns_and_screener
 from mfscreener.jobs.holdings_enrich import sync_holdings_for_active_families
 
 app = typer.Typer(help="MF Screener batch jobs (AMFI ingest, compute, enrich)")
+
+
+@app.callback()
+def _main() -> None:
+    ensure_local_postgres()
+
 
 FULL_HISTORY_GUARD_ROWS = 1_000_000
 

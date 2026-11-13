@@ -1,17 +1,43 @@
 from __future__ import annotations
 
+import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from mfscreener.config import get_settings
 
 _pool: ConnectionPool | None = None
+
+LOCAL_CLUSTER = ("16", "main")
+
+
+def ensure_local_postgres(timeout_s: int = 60) -> None:
+    """Start the local cluster if it is down (Cloud Agent VMs restore it stopped from the snapshot)."""
+    conninfo = conninfo_to_dict(get_settings().database_url)
+    if conninfo.get("host", "localhost") not in ("localhost", "127.0.0.1"):
+        return
+    try:
+        psycopg.connect(get_settings().database_url, connect_timeout=3).close()
+        return
+    except psycopg.OperationalError:
+        pass
+    subprocess.run(["sudo", "pg_ctlcluster", *LOCAL_CLUSTER, "start"], check=False)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            psycopg.connect(get_settings().database_url, connect_timeout=3).close()
+            return
+        except psycopg.OperationalError:
+            time.sleep(1)
+    raise RuntimeError("Local PostgreSQL did not come up; run `sudo pg_ctlcluster 16 main start`")
 
 
 def get_pool() -> ConnectionPool:
